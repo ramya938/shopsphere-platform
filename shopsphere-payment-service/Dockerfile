@@ -32,7 +32,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY --from=builder /install /usr/local
 
 COPY src/ /app/src/
-COPY .env /app/
 
 RUN useradd -u 10001 appuser && chown -R appuser:appuser /app
 USER appuser

@@ -33,7 +33,6 @@ COPY --from=builder /install /usr/local
 
 COPY src/ /app/src/
 COPY alembic.ini /app/
-COPY .env /app/
 
 # Create a non-privileged user and give access
 RUN useradd -u 10001 appuser && chown -R appuser:appuser /app
