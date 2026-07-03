@@ -1,0 +1,47 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: shopsphere-user-db
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: shopsphere_users
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  user-service:
+    build: .
+    container_name: shopsphere-user-service
+    restart: always
+    ports:
+      - "8000:8000"
+    environment:
+      - ENVIRONMENT=production
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_HOST=db
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=shopsphere_users
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/shopsphere_users
+      - JWT_SECRET_KEY=e83a0adbc87612f0e0c034a706b85bfa17c7689d023bfe4c4246830501867e91
+      - JWT_REFRESH_SECRET_KEY=a7d25e0bc87612f0e0c034a706b85bfa17c7689d023bfe4c4246830501867e9f
+      - ACCESS_TOKEN_EXPIRE_MINUTES=15
+      - REFRESH_TOKEN_EXPIRE_DAYS=7
+      - LOG_LEVEL=INFO
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  pgdata:
+    driver: local

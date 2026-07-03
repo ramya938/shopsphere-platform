@@ -1,0 +1,46 @@
+version: '3.8'
+
+services:
+  order-db:
+    image: postgres:16-alpine
+    container_name: shopsphere-order-db
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: shopsphere_orders
+    ports:
+      - "5435:5432" # Mapped to 5435 on the host to avoid conflict with Ports 5432 and 5433
+    volumes:
+      - pgdata_orders:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  order-service:
+    build: .
+    container_name: shopsphere-order-service
+    restart: always
+    ports:
+      - "8002:8002"
+    environment:
+      - ENVIRONMENT=production
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_HOST=order-db
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=shopsphere_orders
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@order-db:5432/shopsphere_orders
+      - PRODUCT_SERVICE_URL=http://product-service:8001 # Points to the product service container inside the docker compose network
+      - JWT_SECRET_KEY=e83a0adbc87612f0e0c034a706b85bfa17c7689d023bfe4c4246830501867e91
+      - ALGORITHM=HS256
+      - LOG_LEVEL=INFO
+    depends_on:
+      order-db:
+        condition: service_healthy
+
+volumes:
+  pgdata_orders:
+    driver: local

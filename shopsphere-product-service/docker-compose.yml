@@ -1,0 +1,45 @@
+version: '3.8'
+
+services:
+  product-db:
+    image: postgres:16-alpine
+    container_name: shopsphere-product-db
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: shopsphere_products
+    ports:
+      - "5433:5432" # Mapped to 5433 on the host to avoid conflict with the User Service database on 5432
+    volumes:
+      - pgdata_products:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  product-service:
+    build: .
+    container_name: shopsphere-product-service
+    restart: always
+    ports:
+      - "8001:8001"
+    environment:
+      - ENVIRONMENT=production
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_HOST=product-db
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=shopsphere_products
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@product-db:5432/shopsphere_products
+      - JWT_SECRET_KEY=e83a0adbc87612f0e0c034a706b85bfa17c7689d023bfe4c4246830501867e91
+      - ALGORITHM=HS256
+      - LOG_LEVEL=INFO
+    depends_on:
+      product-db:
+        condition: service_healthy
+
+volumes:
+  pgdata_products:
+    driver: local

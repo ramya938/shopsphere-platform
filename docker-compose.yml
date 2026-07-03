@@ -1,0 +1,281 @@
+version: '3.8'
+
+services:
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    container_name: shopsphere-zookeeper
+    restart: always
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "2181:2181"
+
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: shopsphere-kafka
+    restart: always
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+
+  # Redis for API Gateway Caching and Rate Limiting
+  redis:
+    image: redis:7-alpine
+    container_name: shopsphere-redis
+    restart: always
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Databases
+  user-db:
+    image: postgres:16-alpine
+    container_name: shopsphere-user-db
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: shopsphere_users
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata_users:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  product-db:
+    image: postgres:16-alpine
+    container_name: shopsphere-product-db
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: shopsphere_products
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata_products:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  order-db:
+    image: postgres:16-alpine
+    container_name: shopsphere-order-db
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: shopsphere_orders
+    ports:
+      - "5435:5432"
+    volumes:
+      - pgdata_orders:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  payment-db:
+    image: postgres:16-alpine
+    container_name: shopsphere-payment-db
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: shopsphere_payments
+    ports:
+      - "5436:5432"
+    volumes:
+      - pgdata_payments:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Services
+  user-service:
+    build:
+      context: ./shopsphere-user-service
+    container_name: shopsphere-user-service
+    restart: always
+    ports:
+      - "8010:8000"
+    environment:
+      - ENVIRONMENT=production
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_HOST=user-db
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=shopsphere_users
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@user-db:5432/shopsphere_users
+      - JWT_SECRET_KEY=e83a0adbc87612f0e0c034a706b85bfa17c7689d023bfe4c4246830501867e91
+      - JWT_REFRESH_SECRET_KEY=a7d25e0bc87612f0e0c034a706b85bfa17c7689d023bfe4c4246830501867e9f
+      - ACCESS_TOKEN_EXPIRE_MINUTES=15
+      - REFRESH_TOKEN_EXPIRE_DAYS=7
+      - LOG_LEVEL=INFO
+    depends_on:
+      user-db:
+        condition: service_healthy
+
+  product-service:
+    build:
+      context: ./shopsphere-product-service
+    container_name: shopsphere-product-service
+    restart: always
+    ports:
+      - "8011:8001"
+    environment:
+      - ENVIRONMENT=production
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_HOST=product-db
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=shopsphere_products
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@product-db:5432/shopsphere_products
+      - JWT_SECRET_KEY=e83a0adbc87612f0e0c034a706b85bfa17c7689d023bfe4c4246830501867e91
+      - ALGORITHM=HS256
+      - LOG_LEVEL=INFO
+    depends_on:
+      product-db:
+        condition: service_healthy
+
+  order-service:
+    build:
+      context: ./shopsphere-order-service
+    container_name: shopsphere-order-service
+    restart: always
+    ports:
+      - "8012:8002"
+    environment:
+      - ENVIRONMENT=production
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_HOST=order-db
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=shopsphere_orders
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@order-db:5432/shopsphere_orders
+      - PRODUCT_SERVICE_URL=http://product-service:8001
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
+      - JWT_SECRET_KEY=e83a0adbc87612f0e0c034a706b85bfa17c7689d023bfe4c4246830501867e91
+      - ALGORITHM=HS256
+      - LOG_LEVEL=INFO
+    depends_on:
+      - kafka
+      - order-db
+
+  payment-service:
+    build:
+      context: ./shopsphere-payment-service
+    container_name: shopsphere-payment-service
+    restart: always
+    ports:
+      - "8013:8003"
+    environment:
+      - ENVIRONMENT=production
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_HOST=payment-db
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=shopsphere_payments
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@payment-db:5432/shopsphere_payments
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
+      - JWT_SECRET_KEY=e83a0adbc87612f0e0c034a706b85bfa17c7689d023bfe4c4246830501867e91
+      - ALGORITHM=HS256
+      - LOG_LEVEL=INFO
+    depends_on:
+      - kafka
+      - payment-db
+
+  notification-service:
+    build:
+      context: ./shopsphere-notification-service
+    container_name: shopsphere-notification-service
+    restart: always
+    ports:
+      - "8014:8004"
+    environment:
+      - ENVIRONMENT=production
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
+      - JWT_SECRET_KEY=e83a0adbc87612f0e0c034a706b85bfa17c7689d023bfe4c4246830501867e91
+      - ALGORITHM=HS256
+      - LOG_LEVEL=INFO
+    depends_on:
+      - kafka
+
+  # API Gateway - Single Point of Entry (Port 8000)
+  gateway:
+    build:
+      context: ./shopsphere-gateway
+    container_name: shopsphere-gateway
+    restart: always
+    ports:
+      - "8000:8000"
+    environment:
+      - ENVIRONMENT=production
+      - REDIS_URL=redis://redis:6379/0
+      - USER_SERVICE_URL=http://user-service:8000
+      - PRODUCT_SERVICE_URL=http://product-service:8001
+      - ORDER_SERVICE_URL=http://order-service:8002
+      - JWT_SECRET_KEY=e83a0adbc87612f0e0c034a706b85bfa17c7689d023bfe4c4246830501867e91
+      - ALGORITHM=HS256
+      - LOG_LEVEL=INFO
+      - CACHE_TTL_SECONDS=60
+      - RATE_LIMIT_WINDOW=60
+      - RATE_LIMIT_AUTH=100
+      - RATE_LIMIT_ANON=20
+    depends_on:
+      redis:
+        condition: service_healthy
+      user-service:
+        condition: service_started
+      product-service:
+        condition: service_started
+      order-service:
+        condition: service_started
+  # Frontend SPA - React served via Nginx (Port 3000)
+  frontend:
+    build:
+      context: ./shopsphere-frontend
+    container_name: shopsphere-frontend
+    restart: always
+    ports:
+      - "3000:80"
+    depends_on:
+      - gateway
+
+volumes:
+  pgdata_users:
+    driver: local
+  pgdata_products:
+    driver: local
+  pgdata_orders:
+    driver: local
+  pgdata_payments:
+    driver: local
+  redisdata:
+    driver: local
